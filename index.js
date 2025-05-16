@@ -1,35 +1,48 @@
 
-const { default: makeWASocket, useSingleFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
-const { Boom } = require('@hapi/boom')
-const { state, saveState } = useSingleFileAuthState('./auth_info.json')
-const qrcode = require('qrcode-terminal')
+const { default: makeWASocket, useSingleFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, useInitAuthCreds } = require('@whiskeysockets/baileys')
+const { makeInMemoryStore } = require('@whiskeysockets/baileys')
+const { delay } = require('@whiskeysockets/baileys')
+const P = require('pino')
 const express = require('express')
+const config = require('./config.json')
 const app = express()
 const PORT = process.env.PORT || 3000
-const config = require('./config.json')
 
-// Keep-alive endpoint for Render
-app.get('/', (req, res) => res.send('CYBER-MD bot is running'))
+app.get('/', (_, res) => res.send('CYBER-MD is running with pairing code'))
 app.listen(PORT, () => console.log(`Web server running on port ${PORT}`))
 
-async function startBot() {
+const startBot = async () => {
+  const { version } = await fetchLatestBaileysVersion()
+  const store = makeInMemoryStore({ logger: P().child({ level: 'silent' }) })
+  const { state, saveCreds } = await useInitAuthCreds()
+
   const sock = makeWASocket({
-    printQRInTerminal: true,
+    version,
+    printQRInTerminal: false,
     auth: state,
-    logger: require('pino')({ level: 'silent' })
+    logger: P({ level: 'silent' }),
+    generateHighQualityLinkPreview: true,
+    browser: ['CYBER-MD', 'Safari', '1.0.0']
   })
 
-  sock.ev.on('creds.update', saveState)
+  store.bind(sock.ev)
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update
-    if (connection === 'close') {
-      const shouldReconnect = (lastDisconnect.error = Boom)?.output?.statusCode !== DisconnectReason.loggedOut
-      if (shouldReconnect) startBot()
+  sock.ev.on('connection.update', async ({ connection, lastDisconnect, isNewLogin, qr, pairingCode }) => {
+    if (connection === 'connecting') {
+      console.log('Connecting...')
     } else if (connection === 'open') {
-      console.log('Bot connected')
+      console.log('Bot connected successfully!')
+    } else if (connection === 'close') {
+      console.log('Connection closed, reconnecting...')
+      startBot()
+    }
+    if (pairingCode) {
+      console.log('\n=== Pairing Code ===')
+      console.log(`Pair this device on your WhatsApp: ${pairingCode}\n`)
     }
   })
+
+  sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0]
@@ -39,18 +52,19 @@ async function startBot() {
     const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text
 
     if (!text) return
+    if (!sender.includes(config.ownerNumber)) return
 
-    // Only allow messages from the owner
-    if (!msg.key.participant?.includes(config.ownerNumber) && !sender.includes(config.ownerNumber)) return
+    const reply = (txt) => sock.sendMessage(sender, { text: txt })
 
-    if (text.toLowerCase() === 'menu') {
-      await sock.sendMessage(sender, { text: 'CYBER-MD Menu:\n\n- menu\n- ping\n- alive\n- repo' })
-    } else if (text.toLowerCase() === 'ping') {
-      await sock.sendMessage(sender, { text: 'Pong!' })
-    } else if (text.toLowerCase() === 'alive') {
-      await sock.sendMessage(sender, { text: 'CYBER-MD is alive and working.' })
-    } else if (text.toLowerCase() === 'repo') {
-      await sock.sendMessage(sender, { text: 'Coming soon: GitHub repo link.' })
+    switch (text.toLowerCase()) {
+      case 'menu':
+        return reply('CYBER-MD Menu:\n- menu\n- ping\n- alive\n- repo')
+      case 'ping':
+        return reply('Pong!')
+      case 'alive':
+        return reply('CYBER-MD is alive and running.')
+      case 'repo':
+        return reply('Coming soon...')
     }
   })
 }
