@@ -1,0 +1,17 @@
+{                                                                     
+  "name": "CYBER-MD",                                           
+  "description": "WhatsApp bot.",                                       
+  "repository": "https://github.com/Kayboy15/CYBER-MD",                                                                     
+  "logo": "https://files.catbox.moe/vfv7n6.jpg",           
+  "keywords": ["nodejs", "Kayboy15","CYBER", "multi device"],                                               
+  "buildpacks": [                                                     
+    {                                                                   
+      "url": "heroku/nodejs"                                        
+    },                                                                
+    {                                                                   
+      "url": "https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest"                                                            
+    },                                                                
+    {                                                                   
+      "url": "https://github.com/clhuang/heroku-buildpack-webp-binaries.git"                                                                  
+    }                                                            
+  ]                                                            
